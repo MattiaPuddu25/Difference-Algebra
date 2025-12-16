@@ -200,81 +200,186 @@ end
 ########################################################
 __vtj(dpr::Union{DifferencePolyRing, DifferentialPolyRing}) = dpr.var_to_jet::Dict{elem_type(dpr), Tuple{Int, Vector{Int}}}
 
-function which_shift(p::DifferencePolyRingElem{T}) where T      # Return the shift applied to an elementary symbol in order to obtain the variable p
+function which_shift(p::DifferencePolyRingElem{QQFieldElem})      # Return the shift applied to an elementary symbol in order to obtain the variable p
     if p==leader(p)                                             # Check whether p is a variable
-        return map(var -> __vtj(dpr)[var], vars(dpre))[1][2]
+      R = parent(p)
+        return map(var -> __vtj(R)[var], vars(p))[1][2]
     else
         return println("Error: the argument is not a variable")
     end
 end
 
-function which_elementary_symbol(p::DifferencePolyRingElem{T}) where T  # return the elementary symbol of the variable p
-    if p==leader(p)                                             # check whether p is a variable
-        return map(var -> __vtj(dpr)[var], vars(dpre))[1][1]
+function which_elementary_symbol(p::DifferencePolyRingElem{T}) where T  # Return the elementary symbol of the variable p
+     R = parent(p)
+    if p==leader(p)                                             # Check whether p is a variable
+        return map(var -> __vtj(R)[var], vars(p))[1][1]
     else
         return println("Error: the argument is not a variable")
     end
 end
 ###################
 ###################
-function multiplicative_variables(F::Vector{DifferencePolyRingElem{QQFieldElem}}) # Computes the set of multiplicative variables 
-                                                                                  # for the leader of each difference polynomial in F
-    G = [leader(f) for f in F]
-    n = length(F);                                                  # number of difference polynomial in F
-    m = n_action_maps(R);                                           # number of elementary symbols in the difference polynomial ring R
-    S = [which_shift(l) for l in G];
-    return S
-    if n == 1
-        return elementary_symbols(R)
+function partition_set_difference_polynomial(F::Vector{DifferencePolyRingElem{QQFieldElem}})  ## Computes the sets G_j in the paper
+    G = [leader(f) for f in F];
+    R = parent(F[1]);
+    m = n_action_maps(R);
+    partition = [Vector{Vector{Int}}() for _ in 1:m]
+    
+    for g in G
+        k = which_elementary_symbol(g)   # k ∈ {1,…,m}
+        push!(partition[k], which_shift(g))
     end
-
-#    for i in 1:n
-#        for j in 1:m
-#        if F[1][1]>
-#             for j in 1:m
-#            
-#         end
-#    end
-#    return M
+    return partition
 end
-
-
-
-
-
-
-
-
-
-
-
+###################
+###################
+function indexed_partition_set_difference_polynomial(F::Vector{DifferencePolyRingElem{QQFieldElem}})  ## Computes the sets G_j in the paper
+    G = [[i,leader(f)] for (i,f) in enumerate(F)];
+    R = parent(F[1]);
+    m = n_action_maps(R);
+    partition = [Vector{Vector{Any}}() for _ in 1:m];
+    
+    for i in 1:length(F)
+        k = which_elementary_symbol(G[i][2])
+        push!(partition[k], [i,which_shift(G[i][2])])
+    end
+    return partition
+end
+###################
+###################
+function multiplicative_variables(F::Vector{DifferencePolyRingElem{QQFieldElem}}) # Computes the set of multiplicative variables
+                                                                                  # The i-th component of the output are the
+                                                                                  # multiplicative variables of f_i, where
+                                                                                  # F=[f_1,...,f_m]
+        partition = indexed_partition_set_difference_polynomial(F)
+        m = length(partition)
+        for i in 1:m
+            Mon_i = [x[2] for x in partition[i]]
+            MV_i = multiplicative_variables_monomial(Mon_i)
+            partition[i] = [[partition[i][j][1],MV_i[j]] for j in 1:length(partition[i])]
+        end
+    partition = vcat(partition...)
+    return [x[2] for x in sort(partition, by = x -> x[1])]   
+end
 ##################
+##################
+function is_Janet_complete(F::Vector{DifferencePolyRingElem{QQFieldElem}})  ## Returns true if F is a Janet complete set
+                                                                            ## of difference polynomials
+    return all(is_Janet_complete_monomial, partition_set_difference_polynomial(F))
+end
+
+##########################################################################################################################
+##########################################################################################################################
+######                                         JANET DIVISION                                                        #####
+##########################################################################################################################
+##########################################################################################################################
+function is_Janet_reducible(p::DifferencePolyRingElem{QQFieldElem}, T::Vector{DifferencePolyRingElem{QQFieldElem}})
+    gens(R)
+    V = vars(p)
+    MV = multiplicative_variables(T)
+    for v in V
+        for i in 1:length(T)
+            ld = leader(T[i]);
+            if which_elementary_symbol(ld)==which_elementary_symbol(v)
+                if minimum(which_shift(v)-which_shift(ld))>=0
+                    theta = which_shift(v)-which_shift(ld)
+                    theta_f = diff_action(T[i],theta)
+                    idx = Set(findall(>(0), theta))
+                    if issubset(idx,findall(>(0), MV[i])) && degree(p,v)>=degree(theta_f,v)
+                        return [true,theta,T[i],MV[i]]      # Returns true +
+                                                              # the shift +
+                                                              # the polynomial that allows division
+                                                              # and its multiplicative variables
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+#################################################
+#################################################
+function is_Janet_reducible_univariate(p::DifferencePolyRingElem{QQFieldElem}, T::Vector{DifferencePolyRingElem{QQFieldElem}})
+    gens(R)
+    MV = multiplicative_variables(T)            #This is computed every time but it is always the same! Solution: a new function with MV in its input
+    ld = leader(p)
+        for i in 1:length(T)
+            v = leader(T[i]);
+            if which_elementary_symbol(ld)==which_elementary_symbol(v)
+                if minimum(which_shift(ld)-which_shift(v))>=0
+                    theta = which_shift(ld)-which_shift(v)
+                    theta_f = diff_action(T[i],theta)
+                    idx = Set(findall(>(0), theta))
+                    if issubset(idx,findall(>(0), MV[i])) && degree(p,ld)>=degree(theta_f,ld)
+                        return [true,theta,T[i],MV[i]]      # Returns true +
+                                                              # the shift +
+                                                              # the polynomial that allows division
+                                                              # and its multiplicative variables
+                    end
+                end
+            end
+    end
+    return false
+end
+#################################################
+#################################################
+
+function normal_form(p::DifferencePolyRingElem{QQFieldElem}, T::Vector{DifferencePolyRingElem{QQFieldElem}})
+    gens(R);
+    r = p;
+    q = 1;
+    if !is_constant(r)
+        v = leader(r);
+        while !is_constant(r) && is_Janet_reducible_univariate(r,T)[1]
+            gens(R);
+            d = degree(r,v)-degree(diff_action(is_Janet_reducible_univariate(r,T)[3],is_Janet_reducible_univariate(r,T)[2]),v);
+            q = initial(diff_action(is_Janet_reducible_univariate(r,T)[3],is_Janet_reducible_univariate(r,T)[2]))*q;
+            r = initial(diff_action(is_Janet_reducible_univariate(r,T)[3],is_Janet_reducible_univariate(r,T)[2]))*r-initial(r)*v^d*diff_action(is_Janet_reducible_univariate(r,T)[3],is_Janet_reducible_univariate(r,T)[2])
+            if degree(r,v)==0
+                break
+            end
+        end
+        coeff = univariate_coefficients(r, v)
+        for (d,c) in enumerate(coeff)
+               t=normal_form(c,T);                         
+                   r = t[2]*r-t[2]*c*v^(d-1)+t[1]*v^(d-1);
+               q=q*t[2];
+            end
+    end
+    return [r,q]
+end
+
+
 ##EXAMPLES
 
-v = 2;                                                                  # number of variables
-e = 2;                                                                  # number of morphisms
+#v = 2;                                                                  # number of variables
+#e = 2;                                                                  # number of morphisms
 
-R, (y_1,y_2) = difference_polynomial_ring(QQ, v, e);
-set_ranking!(R, partition=[[0,1],[1,0]], index_ordering_name=:deglex)
-n=4;
-f_1 = diff_action(y_1, [0,1])^2+1;
-f_2 = diff_action(y_1, [2,0])+diff_action(y_2,[0,1]);
-f_3 = diff_action(y_1, [0,1])*diff_action(y_2,[0,2]);
-f_4 = diff_action(y_1, [1,1])^2-diff_action(y_1,[1,0])^4;
-F=[f_1,f_2,f_3,f_4];
-mu_1 = [[0,1]]
-mu_2 = [[1,0],[0,1]]
-mu_3 = [[1,0],[0,1]]
-mu_4 = [[0,1]]
+#R, (y_1,y_2) = difference_polynomial_ring(QQ, v, e);
+#set_ranking!(R, index_ordering_name=:deglex)
+#n=4;
+#f_1 = diff_action(y_1, [0,1])^2+1;
+#f_2 = diff_action(y_1, [2,0])+diff_action(y_2,[0,1]);
+#f_3 = diff_action(y_1, [0,1])*diff_action(y_2,[0,2]);
+#f_4 = diff_action(y_1, [1,1])^2-diff_action(y_1,[1,0])^4;
+#F=[f_1,f_2,f_3,f_4];
+#mu_1 = [[0,1]]
+#mu_2 = [[1,0],[0,1]]
+#mu_3 = [[1,0],[0,1]]
+#mu_4 = [[0,1]]
 
-f = diff_action(y_2,[1,1])*diff_action(y_2,[0,3])-diff_action(y_1,[2,0]);
-g = diff_action(y_1,[3,0])-diff_action(y_2,[0,3])+(diff_action(y_1,[0,1]))^2;
+#f = diff_action(y_2,[1,1])*diff_action(y_2,[0,3])-diff_action(y_1,[2,0]);
+#g = diff_action(y_1,[3,0])-diff_action(y_2,[0,3])+(diff_action(y_1,[0,1]))^2;
 
-r = f;
-b = 1; 
+#r = f;
+#b = 1; 
 
-M=[[1, 0, 2, 3],[2, 0, 1, 4], [1, 0, 2, 5], [1, 1, 1, 3], [2, 0, 2, 6], [2, 0, 1, 3]];
+#M=[[1, 0, 2, 3],[2, 0, 1, 4], [1, 0, 2, 5], [1, 1, 1, 3], [2, 0, 2, 6], [2, 0, 1, 3]];
 
 
-f_1
-dpr = parent(f_1)
+#f_1
+#dpr = parent(f_1)
+
+
+#p=diff_action(y_1,[3,0])-diff_action(y_2,[0,3])+diff_action(y_1,[0,1])^2;
+#c=-u1[0,2]*u2[1,1] + u1[0,2]*u1[0,1]^2;
